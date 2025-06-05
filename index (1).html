@@ -1,0 +1,173 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestione Giri di Consegna</title>
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/484/484167.png" />
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; display: flex; background: #ecf0f1; }
+    nav { width: 220px; background: #2c3e50; color: white; height: 100vh; padding: 1rem; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
+    nav h2 { font-size: 1.2rem; margin-bottom: 2rem; }
+    nav a { display: block; color: white; margin: 10px 0; text-decoration: none; font-weight: bold; }
+    nav a:hover { text-decoration: underline; }
+    main { flex-grow: 1; padding: 2rem; overflow-x: auto; }
+    header { font-size: 1.5rem; margin-bottom: 1rem; color: #2c3e50; }
+    .btn { padding: 10px 15px; background: #3498db; color: white; border: none; cursor: pointer; margin-right: 10px; }
+    .btn:hover { background: #2980b9; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #34495e; color: white; }
+    #mappa { height: 300px; margin-top: 20px; background: #bdc3c7; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <h2>Menu</h2>
+  <a href="#">📦 Carica Dati</a>
+  <a href="#">📊 Report Giri</a>
+  <a href="#">🗺️ Mappa</a>
+  <a href="#">⚙️ Impostazioni</a>
+</nav>
+
+<main>
+  <header>Gestione Giri di Consegna</header>
+  <button class="btn" onclick="caricaDati()">Carica dati</button>
+  <button class="btn" onclick="cancellaDati()">Cancella dati</button>
+  <div id="somma-colli" style="margin-top: 1rem;">Totale colli selezionati: 0</div>
+  <div id="table-container">
+    <table id="dati-tabella">
+      <thead><tr id="header-row"></tr></thead>
+      <tbody id="body-rows"></tbody>
+    </table>
+  </div>
+  <div id="mappa"></div>
+</main>
+
+<script>
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTAx1N8mUbjjQcqrEVNz9G-yiV9XdEA2jwTJ5wL2ELoIGorlLv4N02JkWoRwh6CILIpKXsRXR3yfKu9/pub?gid=0&single=true&output=csv";
+
+function parseCSV(text) {
+  const rows = [];
+  let insideQuote = false;
+  let row = [];
+  let cell = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (char === '"') {
+      if (insideQuote && nextChar === '"') {
+        cell += '"';
+        i++;
+      } else {
+        insideQuote = !insideQuote;
+      }
+    } else if (char === ',' && !insideQuote) {
+      row.push(cell);
+      cell = "";
+    } else if ((char === '\n' || char === '\r') && !insideQuote) {
+      if (cell || row.length > 0) row.push(cell);
+      if (row.length > 0) rows.push(row);
+      row = [];
+      cell = "";
+      if (char === '\r' && nextChar === '\n') i++;
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length > 0) row.push(cell);
+  if (row.length > 0) rows.push(row);
+  return rows;
+}
+
+function caricaDati() {
+  fetch(CSV_URL)
+    .then(res => res.text())
+    .then(csv => {
+      const dati = parseCSV(csv);
+      const headers = dati[0];
+      const data = dati.slice(1);
+      const tipoIndex = headers.indexOf("Tipo");
+      const indirizzoIndex = headers.indexOf("Indirizzo");
+
+      const headerRow = document.getElementById("header-row");
+      const bodyRows = document.getElementById("body-rows");
+      headerRow.innerHTML = "";
+      bodyRows.innerHTML = "";
+
+      const thCheck = document.createElement("th");
+      thCheck.textContent = "✔";
+      headerRow.appendChild(thCheck);
+
+      headers.forEach((header, i) => {
+        if (i !== tipoIndex) {
+          const th = document.createElement("th");
+          th.textContent = header;
+          headerRow.appendChild(th);
+        }
+      });
+
+      const thReg = document.createElement("th");
+      thReg.textContent = "Regione";
+      headerRow.appendChild(thReg);
+
+      data.forEach((row, rowIndex) => {
+        const tr = document.createElement("tr");
+        const tdCheck = document.createElement("td");
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.onclick = aggiornaSomma;
+        tdCheck.appendChild(chk);
+        tr.appendChild(tdCheck);
+
+        row.forEach((cell, i) => {
+          if (i !== tipoIndex) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+        });
+
+        const tdRegione = document.createElement("td");
+        tdRegione.textContent = getRegione(row[indirizzoIndex]);
+        tr.appendChild(tdRegione);
+        bodyRows.appendChild(tr);
+      });
+    });
+}
+
+function getRegione(indirizzo) {
+  if (!indirizzo) return "ND";
+  const cap = indirizzo.match(/\b(\d{5})\b/);
+  const capRegione = {
+    "00100": "Lazio", "20100": "Lombardia", "80100": "Campania",
+    "10100": "Piemonte", "40100": "Emilia-Romagna"
+  };
+  return cap && capRegione[cap[1]] ? capRegione[cap[1]] : "ND";
+}
+
+function aggiornaSomma() {
+  let somma = 0;
+  document.querySelectorAll("#body-rows tr").forEach(tr => {
+    const chk = tr.querySelector("input[type='checkbox']");
+    if (chk && chk.checked) {
+      const val = parseInt(tr.cells[2].textContent);
+      if (!isNaN(val)) somma += val;
+    }
+  });
+  document.getElementById("somma-colli").textContent = "Totale colli selezionati: " + somma;
+}
+
+function cancellaDati() {
+  document.getElementById("header-row").innerHTML = "";
+  document.getElementById("body-rows").innerHTML = "";
+  document.getElementById("somma-colli").textContent = "Totale colli selezionati: 0";
+}
+</script>
+
+</body>
+</html>
