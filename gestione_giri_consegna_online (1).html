@@ -1,0 +1,204 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Portale Gestione Giri di Consegna</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+    header { background: #2c3e50; color: white; padding: 1rem; text-align: center; }
+    .controls { text-align: center; margin: 1rem; }
+    .controls button {
+      margin: 0 10px; padding: 10px 20px; font-size: 1rem;
+      background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;
+    }
+    .controls button:hover { background-color: #2980b9; }
+    #somma-colli { margin-top: 1rem; font-weight: bold; }
+    #table-container { padding: 1rem; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; }
+    th, td { padding: 8px; border: 1px solid #ddd; text-align: left; }
+    th { background-color: #34495e; color: white; }
+    #mappa { height: 400px; margin: 20px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Portale Gestione Giri di Consegna</h1>
+</header>
+
+<div class="controls">
+  <button onclick="caricaDati()">Carica dati da Google Fogli</button>
+  <button onclick="cancellaDati()">Cancella dati</button>
+  <div id="somma-colli">Totale colli selezionati: 0</div>
+</div>
+
+<div id="table-container">
+  <table id="dati-tabella">
+    <thead>
+      <tr id="header-row"></tr>
+    </thead>
+    <tbody id="body-rows"></tbody>
+  </table>
+</div>
+
+<div id="mappa"></div>
+
+<script>
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTAx1N8mUbjjQcqrEVNz9G-yiV9XdEA2jwTJ5wL2ELoIGorlLv4N02JkWoRwh6CILIpKXsRXR3yfKu9/pub?gid=0&single=true&output=csv";
+
+function parseCSV(text) {
+  const rows = [];
+  let insideQuote = false;
+  let row = [];
+  let cell = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (char === '"') {
+      if (insideQuote && nextChar === '"') {
+        cell += '"';
+        i++;
+      } else {
+        insideQuote = !insideQuote;
+      }
+    } else if (char === ',' && !insideQuote) {
+      row.push(cell);
+      cell = "";
+    } else if ((char === '
+' || char === '') && !insideQuote) {
+      if (cell || row.length > 0) row.push(cell);
+      if (row.length > 0) rows.push(row);
+      row = [];
+      cell = "";
+      if (char === '' && nextChar === '
+') i++;
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length > 0) row.push(cell);
+  if (row.length > 0) rows.push(row);
+  return rows;
+}
+
+function getRegioneFromIndirizzo(indirizzo) {
+  if (!indirizzo) return "";
+  const capRegione = {
+    '00100': 'Lazio', '20100': 'Lombardia', '80100': 'Campania', '10100': 'Piemonte',
+    '40100': 'Emilia-Romagna', '30100': 'Veneto', '50100': 'Toscana', '70100': 'Puglia',
+    '66020': 'Abruzzo', '67051': 'Abruzzo'
+  };
+  const capMatch = indirizzo.match(/(\d{5})/);
+  if (capMatch && capRegione[capMatch[1]]) {
+    return capRegione[capMatch[1]];
+  }
+  return "ND";
+}
+
+function caricaDati() {
+  fetch(CSV_URL)
+    .then(response => response.text())
+    .then(csv => {
+      const rows = parseCSV(csv);
+      const headers = rows[0];
+      const data = rows.slice(1);
+      const tipoIndex = headers.indexOf("Tipo");
+      const colliIndex = headers.indexOf("N° colli");
+      const indirizzoIndex = headers.indexOf("Indirizzo");
+
+      const headerRow = document.getElementById("header-row");
+      const bodyRows = document.getElementById("body-rows");
+      headerRow.innerHTML = "";
+      bodyRows.innerHTML = "";
+
+      const thCheck = document.createElement("th");
+      thCheck.textContent = "Seleziona";
+      headerRow.appendChild(thCheck);
+
+      headers.forEach((header, index) => {
+        if (index !== tipoIndex) {
+          const th = document.createElement("th");
+          th.textContent = header;
+          headerRow.appendChild(th);
+        }
+      });
+
+      const thRegione = document.createElement("th");
+      thRegione.textContent = "Regione";
+      headerRow.appendChild(thRegione);
+
+      data.forEach((row, rowIndex) => {
+        const tr = document.createElement("tr");
+
+        const tdCheck = document.createElement("td");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.onclick = aggiornaSomma;
+        tdCheck.appendChild(checkbox);
+        tr.appendChild(tdCheck);
+
+        row.forEach((cell, index) => {
+          if (index !== tipoIndex) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+        });
+
+        const tdRegione = document.createElement("td");
+        tdRegione.textContent = getRegioneFromIndirizzo(row[indirizzoIndex]);
+        tr.appendChild(tdRegione);
+
+        tr.draggable = true;
+        tr.addEventListener("dragstart", e => {
+          e.dataTransfer.setData("text/plain", rowIndex);
+        });
+        tr.addEventListener("dragover", e => e.preventDefault());
+        tr.addEventListener("drop", e => {
+          e.preventDefault();
+          const draggedIndex = e.dataTransfer.getData("text/plain");
+          const rows = document.querySelectorAll("#body-rows tr");
+          const draggedRow = rows[draggedIndex];
+          const targetRow = e.target.closest("tr");
+          if (draggedRow && targetRow && draggedRow !== targetRow) {
+            document.getElementById("body-rows").insertBefore(draggedRow, targetRow);
+          }
+        });
+
+        bodyRows.appendChild(tr);
+      });
+    })
+    .catch(error => {
+      alert("Errore nel caricamento dei dati: " + error);
+      console.error(error);
+    });
+}
+
+function aggiornaSomma() {
+  let somma = 0;
+  const righe = document.querySelectorAll("#body-rows tr");
+  righe.forEach(riga => {
+    const checkbox = riga.querySelector("input[type='checkbox']");
+    if (checkbox && checkbox.checked) {
+      const colli = parseInt(riga.cells[2].textContent);
+      if (!isNaN(colli)) somma += colli;
+    }
+  });
+  document.getElementById("somma-colli").textContent = "Totale colli selezionati: " + somma;
+}
+
+function cancellaDati() {
+  document.getElementById("header-row").innerHTML = "";
+  document.getElementById("body-rows").innerHTML = "";
+  document.getElementById("somma-colli").textContent = "Totale colli selezionati: 0";
+}
+</script>
+
+</body>
+</html>
